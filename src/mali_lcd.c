@@ -32,6 +32,7 @@
 #include "mali_def.h"
 #include "mali_fbdev.h"
 #include "mali_lcd.h"
+extern void MaliHWSave(ScrnInfoPtr pScrn);
 
 static void fbdev_lcd_crtc_dpms(xf86CrtcPtr crtc, int mode)
 {
@@ -131,7 +132,7 @@ static void fbdev_lcd_output_dpms(xf86OutputPtr output, int mode)
 	}
 	else if( mode == DPMSModeOff )
 	{
-		ioctl(fPtr->fb_lcd_fd, FBIOBLANK, FB_BLANK_POWERDOWN);
+		ioctl(fPtr->fb_lcd_fd, FBIOBLANK, 1/* FB_BLANK_POWERDOWN */);
 	}
 }
 
@@ -151,7 +152,7 @@ static int fbdev_lcd_output_mode_valid(xf86OutputPtr output, DisplayModePtr pMod
 	IGNORE( pMode );
 
 	/* TODO: return MODE_ERROR in case of unsupported mode */
-	xf86DrvMsg(0, X_INFO, "Mode %i x %i valid\n", pMode->HDisplay, pMode->VDisplay );
+//	xf86DrvMsg(0, X_INFO, "Mode %i x %i valid\n", pMode->HDisplay, pMode->VDisplay );
 
 	return MODE_OK;
 }
@@ -192,12 +193,49 @@ static void fbdev_lcd_output_mode_set(xf86OutputPtr output, DisplayModePtr mode,
 	fPtr->fb_lcd_var.yres = mode->VDisplay;
 	fPtr->fb_lcd_var.xres_virtual = mode->HDisplay;
 	fPtr->fb_lcd_var.yres_virtual = mode->VDisplay*2;
+// add by liaods, from ivtv/ivtvhw.c
+	fPtr->fb_lcd_var.xoffset = fPtr->fb_lcd_var.yoffset = 0;
+	fPtr->fb_lcd_var.pixclock = mode->Clock ? 1000000000 / mode->Clock : 0;
+	fPtr->fb_lcd_var.right_margin = mode->HSyncStart - mode->HDisplay;
+	fPtr->fb_lcd_var.hsync_len = mode->HSyncEnd - mode->HSyncStart;
+	fPtr->fb_lcd_var.left_margin = mode->HTotal - mode->HSyncEnd;
+	fPtr->fb_lcd_var.lower_margin = mode->VSyncStart - mode->VDisplay;
+	fPtr->fb_lcd_var.vsync_len = mode->VSyncEnd - mode->VSyncStart;
+	fPtr->fb_lcd_var.upper_margin = mode->VTotal - mode->VSyncEnd;
+	fPtr->fb_lcd_var.sync = 0;
+	if (mode->Flags & V_PHSYNC)
+		fPtr->fb_lcd_var.sync |= FB_SYNC_HOR_HIGH_ACT;
+	if (mode->Flags & V_PVSYNC)
+		fPtr->fb_lcd_var.sync |= FB_SYNC_VERT_HIGH_ACT;
+	if (mode->Flags & V_PCSYNC)
+		fPtr->fb_lcd_var.sync |= FB_SYNC_COMP_HIGH_ACT;
+#if 1		/* Badly needed for PAL/NTSC on Amiga (amifb)!! [geert] */
+	if (mode->Flags & V_BCAST)
+		fPtr->fb_lcd_var.sync |= FB_SYNC_BROADCAST;
+#endif
+	if (mode->Flags & V_INTERLACE)
+		fPtr->fb_lcd_var.vmode = FB_VMODE_INTERLACED;
+	else if (mode->Flags & V_DBLSCAN)
+		fPtr->fb_lcd_var.vmode = FB_VMODE_DOUBLE;
+	else
+		fPtr->fb_lcd_var.vmode = FB_VMODE_NONINTERLACED;
+	
+	xf86DrvMsg(0, X_INFO, "clk=%d, l=%d, r=%d, u=%d, l=%d, h=%d, v=%d, vmode=%d, sync=%d\n", 
+		fPtr->fb_lcd_var.pixclock, fPtr->fb_lcd_var.left_margin, fPtr->fb_lcd_var.right_margin, 
+		fPtr->fb_lcd_var.upper_margin, fPtr->fb_lcd_var.lower_margin,
+		fPtr->fb_lcd_var.hsync_len, fPtr->fb_lcd_var.vsync_len,
+		fPtr->fb_lcd_var.vmode, fPtr->fb_lcd_var.sync);
+// add end
+
 	xf86DrvMsg(0, X_INFO, "Changing mode to %i %i %i %i\n", fPtr->fb_lcd_var.xres, fPtr->fb_lcd_var.yres, fPtr->fb_lcd_var.xres_virtual, fPtr->fb_lcd_var.yres_virtual);
 
 	if ( ioctl( fPtr->fb_lcd_fd, FBIOPUT_VSCREENINFO, &fPtr->fb_lcd_var ) < 0 )
 	{
 		xf86DrvMsg(0, X_INFO, "Unable to set mode!\n");
 	}
+	else
+		MaliHWSave(output->scrn);
+	system("/usr/bin/set_window.sh 2000000&");
 
 }
 
@@ -213,6 +251,7 @@ DisplayModePtr fbdev_make_mode( int xres, int yres, DisplayModePtr prev )
 	DisplayModePtr mode_ptr;
 	unsigned int hactive_s = xres;
 	unsigned int vactive_s = yres;
+	return NULL; // by liaods, do not allow to make mode
 
 	mode_ptr = xnfcalloc(1, sizeof(DisplayModeRec));
 
@@ -258,7 +297,7 @@ static DisplayModePtr fbdev_lcd_output_get_modes(xf86OutputPtr output)
 			int xres = mode->HDisplay;
 			int yres = mode->VDisplay;
 
-			xf86DrvMsg(0, X_INFO, "Adding mode: %i x %i\n", xres, yres);
+			//xf86DrvMsg(0, X_INFO, "Adding mode: %i x %i\n", xres, yres);
 
 			if ( modeptr_first == NULL ) 
 			{

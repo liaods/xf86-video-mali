@@ -54,6 +54,7 @@
 
 #define PAGE_MASK    (~(getpagesize() - 1))
 
+
 static const OptionInfoRec * MaliAvailableOptions(int chipid, int busid);
 static void	MaliIdentify(int flags);
 static Bool	MaliProbe(DriverPtr drv, int flags);
@@ -218,6 +219,12 @@ static void MaliIdentify(int flags)
 	xf86PrintChipsets(MALI_NAME, "driver for Mali Framebuffer", MaliChipsets);
 }
 
+static void set_window_percent(void)
+{
+	/* delay 2 seconds? */
+	system("/usr/bin/set_window.sh 2000000&");
+} 
+
 static Bool fbdev_crtc_config_resize( ScrnInfoPtr pScrn, int width, int height )
 {
 	MaliPtr fPtr = MALIPTR(pScrn);
@@ -254,7 +261,7 @@ static Bool fbdev_crtc_config_resize( ScrnInfoPtr pScrn, int width, int height )
 			xf86CrtcSetMode( crtc, &crtc->mode, crtc->rotation, crtc->x, crtc->y );
 		}
 	}
-
+	set_window_percent();
 	return TRUE;
 }
 
@@ -493,6 +500,8 @@ void MaliHWSave(ScrnInfoPtr pScrn)
 	TRACE_ENTER();
 	if (0 != ioctl(fPtr->fd,FBIOGET_VSCREENINFO,(void*)(&fPtr->saved_var)))
         xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "FBIOGET_VSCREENINFO: %s\n", strerror(errno));
+        xf86DrvMsg(pScrn->scrnIndex, X_INFO, "FBIOGET_VSCREENINFO: save x=%d, y=%d\n", 
+		fPtr->saved_var.xres, fPtr->saved_var.yres);
 }
 
 void MaliHWRestore(ScrnInfoPtr pScrn)
@@ -502,6 +511,9 @@ void MaliHWRestore(ScrnInfoPtr pScrn)
 	TRACE_ENTER();
 	if (0 != ioctl(fPtr->fd,FBIOPUT_VSCREENINFO,(void*)(&fPtr->saved_var)))
         xf86DrvMsg(pScrn->scrnIndex, X_ERROR,"FBIOPUT_VSCREENINFO: %s\n", strerror(errno));
+        xf86DrvMsg(pScrn->scrnIndex, X_INFO, "FBIOGET_VSCREENINFO: restore x=%d, y=%d\n", 
+		fPtr->saved_var.xres, fPtr->saved_var.yres);
+	set_window_percent();
 }
 
 Bool MaliHWProbe( const char *device, char **namep )
@@ -561,6 +573,7 @@ Bool MaliHWSaveScreen(ScreenPtr pScreen, int mode)
 		xf86DrvMsg(pScrn->scrnIndex, X_ERROR, "FBIOBLANK: %s\n", strerror(errno));
 		return FALSE;
 	}
+	MaliHWSave(pScrn);
 
 	return TRUE;
 }
@@ -612,10 +625,12 @@ Bool MaliHWEnterVT(VT_FUNC_ARGS_DECL)
 	SCRN_INFO_PTR(arg);
 
 	TRACE_ENTER();
+	MaliHWRestore(pScrn);
 
 	if (!MaliHWModeInit(pScrn, pScrn->currentMode)) return FALSE;
 		MaliHWAdjustFrame(ADJUST_FRAME_ARGS(pScrn, pScrn->frameX0, pScrn->frameY0));
 
+	set_window_percent();
 	return TRUE;
 }
 
@@ -624,8 +639,7 @@ void MaliHWLeaveVT(VT_FUNC_ARGS_DECL)
 	SCRN_INFO_PTR(arg);
 
 	TRACE_ENTER();
-
-	MaliHWRestore(pScrn);
+	set_window_percent();
 }
 
 void MaliHWDPMSSet(ScrnInfoPtr pScrn, int mode, int flags)
@@ -643,6 +657,7 @@ void MaliHWDPMSSet(ScrnInfoPtr pScrn, int mode, int flags)
 		case DPMSModeOn:
 			fbmode = 0;
 			break;
+#if 0 // by liaods
 		case DPMSModeStandby:
 			fbmode = 2;
 			break;
@@ -652,6 +667,14 @@ void MaliHWDPMSSet(ScrnInfoPtr pScrn, int mode, int flags)
 		case DPMSModeOff:
 			fbmode = 4;
 			break;
+#else
+		case DPMSModeStandby:
+		case DPMSModeSuspend:
+		case DPMSModeOff:
+			fbmode = 1;
+			break;
+
+#endif
 		default:
 			return;
 	}
@@ -1031,7 +1054,10 @@ static Bool MaliPreInit(ScrnInfoPtr pScrn, int flags)
 				mode = mode->next;
 			} while (mode != NULL && mode != first);
 		}
+/* FIXME: by liaods, set mode to 1920x1200 failed if call xf86PruneDriverModes */
+#if 0
 		xf86PruneDriverModes(pScrn);
+#endif
 	}
 	if ( NULL == pScrn->modes ) xf86DrvMsg( pScrn->scrnIndex, X_ERROR, "Failed to get video modes!\n" );
 	pScrn->currentMode = pScrn->modes;
@@ -1089,7 +1115,7 @@ static Bool MaliScreenInit(SCREEN_INIT_ARGS_DECL)
 	}
 	fPtr->fboff = MaliHWLinearOffset(pScrn);
 
-	MaliHWSave(pScrn);
+	//MaliHWSave(pScrn);
 
 	if (!MaliHWModeInit(pScrn, pScrn->currentMode))
 	{
@@ -1170,7 +1196,7 @@ static Bool MaliScreenInit(SCREEN_INIT_ARGS_DECL)
 		fPtr->exa = NULL;
 	}
 
-	miInitializeBackingStore(pScreen);
+	//miInitializeBackingStore(pScreen);
 	xf86SetBackingStore(pScreen);
 	xf86SetSilkenMouse(pScreen);
 
@@ -1222,7 +1248,7 @@ static Bool MaliScreenInit(SCREEN_INIT_ARGS_DECL)
 		xf86DrvMsg( pScrn->scrnIndex, X_INFO, "Opened umplock device!\n" );
 	}
 #endif /* UMP_LOCK_ENABLED */
-
+	set_window_percent();
 	return TRUE;
 }
 
@@ -1232,6 +1258,7 @@ static Bool MaliCloseScreen(CLOSE_SCREEN_ARGS_DECL)
 	MaliPtr fPtr = MALIPTR(pScrn);
 
 	TRACE_ENTER();
+	exit(0);
 
 	MaliHWRestore(pScrn);
 	MaliHWUnmapVidmem(pScrn);
